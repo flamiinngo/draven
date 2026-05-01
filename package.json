@@ -1,0 +1,29 @@
+{
+  "name": "draven",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:circuits": "cd encrypted-ixs && cargo arcis build",
+    "build:program": "anchor build",
+    "init-comp-defs": "node --experimental-vm-modules scripts/init-comp-defs.mjs",
+    "upload-circuits": "node --experimental-vm-modules scripts/upload-circuits.mjs",
+    "finalize-circuits": "node --experimental-vm-modules scripts/finalize-circuits.mjs",
+    "verify": "node scripts/verify-onchain.js",
+    "test:e2e": "ts-node scripts/test-e2e.ts",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@arcium-hq/client": "0.9.6",
+    "@coral-xyz/anchor": "0.32.1",
+    "@noble/curves": "^1.4.0",
+    "@solana/web3.js": "^1.98.0",
+    "patch-package": "^8.0.0",
+    "postinstall-postinstall": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-mocha": "^10.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.5"
+  }
+}

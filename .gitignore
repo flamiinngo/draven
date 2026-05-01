@@ -1,0 +1,18 @@
+# Build artifacts
+target/
+**/.anchor/
+node_modules/
+
+# Solana keypairs (never commit private keys)
+**/*.json
+!app/package.json
+!app/tsconfig.json
+!package.json
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db

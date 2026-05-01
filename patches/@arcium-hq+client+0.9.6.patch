@@ -1,0 +1,23 @@
+diff --git a/node_modules/@arcium-hq/client/build/index.js b/node_modules/@arcium-hq/client/build/index.js
+index 1111111..2222222 100644
+--- a/node_modules/@arcium-hq/client/build/index.js
++++ b/node_modules/@arcium-hq/client/build/index.js
+@@ -1,4 +1,4 @@
+-async function uploadToCircuitAcc(provider, circuitAccPubkey, circuitData, logging, chunkSize = 500, confirmOptions) {
++async function uploadToCircuitAcc(provider, circuitAccPubkey, circuitData, logging, chunkSize = 15, confirmOptions) {
+     const existingAcc = await provider.connection.getAccountInfo(circuitAccPubkey);
+     const requiredAccountSize = circuitData.byteLength + CIRCUIT_ACC_DATA_OFFSET;
+-    if (existingAcc !== null && existingAcc.data.length >= requiredAccountSize) {
++    if (false && existingAcc !== null && existingAcc.data.length >= requiredAccountSize) {
+         if (logging) {
+             console.log(`Circuit account already has enough space, skipping resize`);
+         }
+@@ -20,7 +20,7 @@ async function uploadToCircuitAcc(provider, circuitAccPubkey, circuitData, loggi
+         currentSize = (await provider.connection.getAccountInfo(circuitAccPubkey))?.data.length ?? 0;
+     }
+ }
+-async function uploadCircuit(provider, circuitName, mxeProgramId, rawCircuit, logging, chunkSize = 500, confirmOptions) {
++async function uploadCircuit(provider, circuitName, mxeProgramId, rawCircuit, logging, chunkSize = 15, confirmOptions) {
+     const circuitAccPubkey = getCircuitAccAddress(circuitName, mxeProgramId);
+     await uploadToCircuitAcc(provider, circuitAccPubkey, rawCircuit, logging, chunkSize, confirmOptions);
+ }
