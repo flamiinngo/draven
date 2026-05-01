@@ -146,17 +146,17 @@ pub mod draven {
         require!(!ctx.accounts.borrower_account.is_active, ErrorCode::LoanAlreadyActive);
 
         // Deposit collateral into the vault.
-        token::transfer(
-            CpiContext::new(
+        {
+            let cpi_ctx = CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
                     from:      ctx.accounts.borrower_ata.to_account_info(),
                     to:        ctx.accounts.vault.to_account_info(),
                     authority: ctx.accounts.borrower.to_account_info(),
                 },
-            ),
-            collateral_lamports,
-        )?;
+            );
+            token::transfer(cpi_ctx, collateral_lamports)?;
+        }
 
         // Reset any residue from prior loan cycle before setting new state.
         let acct = &mut ctx.accounts.borrower_account;
@@ -172,6 +172,17 @@ pub mod draven {
         acct.loan_ts              = 0;
         acct.bump                 = ctx.bumps.borrower_account;
 
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let callback = StoreBorrowerProfileCallback::callback_ix(
+            computation_offset,
+            &ctx.accounts.mxe_account,
+            &[CallbackAccount {
+                pubkey:      ctx.accounts.borrower_account.key(),
+                is_writable: true,
+            }],
+        )?;
+
         let args = ArgBuilder::new()
             .x25519_pubkey(pub_key)
             .plaintext_u128(nonce)
@@ -182,23 +193,7 @@ pub mod draven {
             .encrypted_u64(requested_amount_ct)
             .build();
 
-        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
-
-        queue_computation(
-            ctx.accounts,
-            computation_offset,
-            args,
-            vec![StoreBorrowerProfileCallback::callback_ix(
-                computation_offset,
-                &ctx.accounts.mxe_account,
-                &[CallbackAccount {
-                    pubkey:      ctx.accounts.borrower_account.key(),
-                    is_writable: true,
-                }],
-            )?],
-            1,
-            0,
-        )?;
+        queue_computation(ctx.accounts, computation_offset, args, vec![callback], 1, 0)?;
 
         Ok(())
     }
@@ -859,9 +854,9 @@ pub struct RequestLoan<'info> {
     #[account(address = usdc::ID)]
     pub usdc_mint: Account<'info, Mint>,
     #[account(mut, seeds = [b"vault"], bump = pool_state.vault_bump)]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: Box<Account<'info, TokenAccount>>,
     #[account(seeds = [b"pool"], bump = pool_state.bump)]
-    pub pool_state: Account<'info, PoolState>,
+    pub pool_state: Box<Account<'info, PoolState>>,
     #[account(
         init_if_needed,
         payer = borrower,
@@ -869,7 +864,7 @@ pub struct RequestLoan<'info> {
         seeds = [b"borrower", borrower.key().as_ref()],
         bump,
     )]
-    pub borrower_account: Account<'info, BorrowerAccount>,
+    pub borrower_account: Box<Account<'info, BorrowerAccount>>,
     #[account(
         init_if_needed,
         space = 9,
@@ -878,7 +873,7 @@ pub struct RequestLoan<'info> {
         bump,
         address = derive_sign_pda!(),
     )]
-    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+    pub sign_pda_account: Box<Account<'info, ArciumSignerAccount>>,
     #[account(address = derive_mxe_pda!())]
     pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(

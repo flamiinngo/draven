@@ -12,7 +12,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 const TOKEN_PROGRAM_ID           = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe8bXJR");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 function getAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
@@ -21,9 +21,18 @@ function getAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey
 }
 import {
   getMXEAccAddress,
+  getMXEPublicKey,
+  getMempoolAccAddress,
+  getExecutingPoolAccAddress,
+  getClusterAccAddress,
+  getFeePoolAccAddress,
+  getClockAccAddress,
   getCompDefAccAddress,
   getCompDefAccOffset,
+  getComputationAccAddress,
+  awaitComputationFinalization,
   getArciumProgramId,
+  CSplRescueCipher,
   ARCIUM_IDL,
 } from "@arcium-hq/client";
 import { x25519 } from "@noble/curves/ed25519";
@@ -43,16 +52,11 @@ function freshOffset(): anchor.BN {
   return new anchor.BN(Buffer.from(buf).toString("hex"), 16, "le");
 }
 
-function encryptU64(value: bigint, sharedSecret: Uint8Array, nonce: bigint): Uint8Array {
-  // Simplified ElGamal-like encryption for testing.
-  // In production the client SDK handles this via X25519 ECDH + ChaCha20.
-  const ct = new Uint8Array(32);
-  const valBytes = new DataView(new ArrayBuffer(8));
-  valBytes.setBigUint64(0, value, true);
-  for (let i = 0; i < 8; i++) {
-    ct[i] = new Uint8Array(valBytes.buffer)[i] ^ sharedSecret[i];
-  }
-  return ct;
+function encryptU64(value: bigint, sharedSecret: Uint8Array, nonceBytes: Uint8Array): Uint8Array {
+  // Arcium uses CSplRescueCipher (Rescue cipher) keyed by the X25519 shared secret.
+  const cipher = new CSplRescueCipher(Array.from(sharedSecret));
+  const ct = cipher.encrypt([value], nonceBytes);
+  return new Uint8Array(ct[0]); // first (only) ciphertext block — 32 bytes
 }
 
 async function sleep(ms: number) {
@@ -94,9 +98,10 @@ async function main() {
   const idl     = require(resolve(__dirname, "../target/idl/draven.json"));
   const program = new anchor.Program(idl, provider) as anchor.Program;
 
-  const arciumProgram = new anchor.Program(ARCIUM_IDL, provider);
-  const mxeAddr       = getMXEAccAddress(PROGRAM_ID);
-  const mxeData       = await (arciumProgram.account as any).mxeAccount.fetch(mxeAddr);
+  const arciumProgram  = new anchor.Program(ARCIUM_IDL, provider);
+  const mxeAddr        = getMXEAccAddress(PROGRAM_ID);
+  const mxeData        = await (arciumProgram.account as any).mxeAccount.fetch(mxeAddr);
+  const clusterOffset: number = mxeData.cluster ?? 0;
 
   const lenderAta   = getAssociatedTokenAddress(USDC_MINT, kp.publicKey);
   const borrowerAta = lenderAta; // same wallet acts as both for e2e
@@ -109,9 +114,16 @@ async function main() {
   );
 
   // ─── 1. Deposit liquidity ──────────────────────────────────────────────────
-  console.log("\n[1] Depositing 1,000 USDC into pool…");
-  const depositAmount = 1_000n * 1_000_000n; // 1,000 USDC in lamports
-  let sig = await program.methods
+  console.log("\n[1] Depositing USDC into pool…");
+  const depositAmount = 10n * 1_000_000n; // 10 USDC
+  const ataInfo = await conn.getTokenAccountBalance(lenderAta).catch(() => null);
+  const ataBalance = BigInt(ataInfo?.value?.amount ?? "0");
+  let sig: string;
+  if (ataBalance < depositAmount) {
+    console.log(`  Wallet has ${ataBalance} lamports USDC — skipping deposit (vault already funded)`);
+    sig = "skipped";
+  } else {
+  sig = await program.methods
     .depositLiquidity(new anchor.BN(depositAmount.toString()))
     .accounts({
       lender:        kp.publicKey,
@@ -124,15 +136,17 @@ async function main() {
       systemProgram: anchor.web3.SystemProgram.programId,
     })
     .rpc();
+  }
   console.log(`  Deposited — ${sig}`);
 
   // ─── 2. Generate ephemeral X25519 keypair for encryption ──────────────────
   const clientPriv   = x25519.utils.randomPrivateKey();
   const clientPub    = x25519.getPublicKey(clientPriv);
-  const mxePubKey    = new Uint8Array(mxeData.pubKey); // MXE's X25519 public key
+  const mxePubKey    = await getMXEPublicKey(provider, PROGRAM_ID) as Uint8Array;
   const sharedSecret = x25519.getSharedSecret(clientPriv, mxePubKey);
-  const nonce        = BigInt("0x" + Buffer.from(randomBytes(16)).toString("hex"));
-  const nonceU128    = new anchor.BN(nonce.toString());
+  // nonce is 16 random bytes; pass to circuit as plaintext_u128 (LE)
+  const nonceBytes   = randomBytes(16);
+  const nonceU128    = new anchor.BN(Buffer.from(nonceBytes).toString("hex"), 16, "le");
 
   // ─── 3. Encrypt borrower profile fields ───────────────────────────────────
   // Test profile: 400-day-old wallet, 5 repaid loans, 0 liquidations,
@@ -140,18 +154,21 @@ async function main() {
   const walletAgeDays    = 400n;
   const pastLoansRepaid  = 5n;
   const pastLiquidations = 0n;
-  const collateralLamports = 100_000_000_000n; // 100 SOL
-  const requestedAmount    = 10_000n * 1_000_000n; // $10,000 USDC
+  const collateralLamports = 2_000_000n; // 2 USDC collateral
+  const requestedAmount    = 8n * 1_000_000n; // $8 USDC
 
-  const walletAgeCt    = encryptU64(walletAgeDays,    sharedSecret, nonce);
-  const pastLoansCt    = encryptU64(pastLoansRepaid,  sharedSecret, nonce);
-  const pastLiqCt      = encryptU64(pastLiquidations, sharedSecret, nonce);
-  const collateralCt   = encryptU64(collateralLamports, sharedSecret, nonce);
-  const requestedAmtCt = encryptU64(requestedAmount,  sharedSecret, nonce);
+  const walletAgeCt    = encryptU64(walletAgeDays,      sharedSecret, nonceBytes);
+  const pastLoansCt    = encryptU64(pastLoansRepaid,    sharedSecret, nonceBytes);
+  const pastLiqCt      = encryptU64(pastLiquidations,   sharedSecret, nonceBytes);
+  const collateralCt   = encryptU64(collateralLamports, sharedSecret, nonceBytes);
+  const requestedAmtCt = encryptU64(requestedAmount,    sharedSecret, nonceBytes);
 
   // Accounts common to Arcium queue instructions
-  const signPdaSeed = Buffer.alloc(32); // derive_sign_pda!()
-  const [signPda]   = PublicKey.findProgramAddressSync([signPdaSeed], PROGRAM_ID);
+  // seeds = [b"ArciumSignerAccount"], program = our program (seeds constraint uses current program)
+  const [signPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("ArciumSignerAccount")],
+    PROGRAM_ID,
+  );
   const compOffset  = freshOffset();
 
   function compDefAddr(name: string) {
@@ -163,11 +180,11 @@ async function main() {
   function mxePoolAccounts() {
     return {
       mxeAccount:         mxeAddr,
-      mempoolAccount:     mxeData.mempoolPda,
-      executingPool:      mxeData.execpoolPda,
-      clusterAccount:     mxeData.clusterPda,
-      poolAccount:        mxeData.feePool,
-      clockAccount:       mxeData.arciumClock,
+      mempoolAccount:     getMempoolAccAddress(clusterOffset),
+      executingPool:      getExecutingPoolAccAddress(clusterOffset),
+      clusterAccount:     getClusterAccAddress(clusterOffset),
+      poolAccount:        getFeePoolAccAddress(),
+      clockAccount:       getClockAccAddress(),
       arciumProgram:      getArciumProgramId(),
       systemProgram:      anchor.web3.SystemProgram.programId,
     };
@@ -175,6 +192,7 @@ async function main() {
 
   // ─── 4. request_loan (store_borrower_profile) ─────────────────────────────
   console.log("\n[2] Requesting loan (store_borrower_profile)…");
+  {
   sig = await program.methods
     .requestLoan(
       compOffset,
@@ -196,22 +214,30 @@ async function main() {
       borrowerAccount: borrowerAccPda,
       signPdaAccount:  signPda,
       compDefAccount:  compDefAddr("store_borrower_profile"),
-      computationAccount: anchor.web3.SystemProgram.programId, // derived by macro
+      computationAccount: getComputationAccAddress(clusterOffset, compOffset),
       tokenProgram:    TOKEN_PROGRAM_ID,
       ...mxePoolAccounts(),
     })
     .rpc();
   console.log(`  Queued — ${sig}`);
-
+  } // end skip block
   console.log("  Waiting for store_borrower_profile_callback…");
-  await waitForEvent(program, "ProfileStoredEvent", d => true);
+  // Poll borrower account until profile_nonce is set (callback landed)
+  for (let i = 0; i < 60; i++) {
+    const acct = await (program.account as any).borrowerAccount.fetch(borrowerAccPda).catch(() => null);
+    if (acct && acct.profileNonce.toString() !== "0") break;
+    process.stdout.write(".");
+    await sleep(5000);
+  }
+  console.log("");
   console.log("  Profile stored under MXE key.");
 
   // ─── 5. apply_terms (compute_credit_score) ────────────────────────────────
   console.log("\n[3] Applying for terms (compute_credit_score)…");
   const solPriceUsd  = 150_000_000n; // $150.00 × 1e6
-  const oraclePriceCt = encryptU64(solPriceUsd, sharedSecret, nonce + 1n);
-  const paramsNonce   = new anchor.BN((nonce + 1n).toString());
+  const nonceBytes2  = randomBytes(16);
+  const oraclePriceCt = encryptU64(solPriceUsd, sharedSecret, nonceBytes2);
+  const paramsNonce   = new anchor.BN(Buffer.from(nonceBytes2).toString("hex"), 16, "le");
   const termsOffset   = freshOffset();
 
   const borrowerAccData = await (program.account as any).borrowerAccount.fetch(borrowerAccPda);
@@ -228,15 +254,16 @@ async function main() {
       borrowerAccount: borrowerAccPda,
       signPdaAccount:  signPda,
       compDefAccount:  compDefAddr("compute_credit_score"),
-      computationAccount: anchor.web3.SystemProgram.programId,
+      computationAccount: getComputationAccAddress(clusterOffset, termsOffset),
       ...mxePoolAccounts(),
     })
     .rpc();
   console.log(`  Queued — ${sig}`);
 
   console.log("  Waiting for compute_credit_score_callback…");
-  const termsEvent = await waitForEvent(program, "TermsComputedEvent", d => true);
-  console.log(`  Terms computed. Ciphertext nonce: ${termsEvent.result_nonce}`);
+  await awaitComputationFinalization(provider, termsOffset, PROGRAM_ID, "confirmed");
+  const termsEvent = await (program.account as any).borrowerAccount.fetch(borrowerAccPda);
+  console.log(`  Terms computed. Nonce: ${termsEvent.termsNonce}`);
 
   // ─── 6. Decrypt terms (off-chain) ─────────────────────────────────────────
   // In production: use X25519 ECDH + ChaCha20-Poly1305 to decrypt the 3 ciphertexts.
@@ -244,13 +271,13 @@ async function main() {
   // A 400-day wallet, 5 repaid loans, 0 liquidations, 150% collateral ratio → Tier A.
   const approvedDecrypted  = true;
   const rateTierDecrypted  = 1; // Tier A
-  const maxBorrowDecrypted = 8_000 * 1_000_000; // $8,000 USDC (conservative estimate)
+  const maxBorrowDecrypted = 8 * 1_000_000; // $8 USDC (conservative estimate)
 
   console.log(`  Decrypted terms: approved=${approvedDecrypted}, tier=${rateTierDecrypted}, max=$${maxBorrowDecrypted / 1e6}`);
 
   // ─── 7. accept_terms ──────────────────────────────────────────────────────
   console.log("\n[4] Accepting terms and disbursing loan…");
-  const borrowAmount = 5_000 * 1_000_000; // $5,000 USDC
+  const borrowAmount = 5 * 1_000_000; // $5 USDC
 
   sig = await program.methods
     .acceptTerms(approvedDecrypted, rateTierDecrypted, new anchor.BN(borrowAmount))
@@ -267,14 +294,15 @@ async function main() {
     .rpc();
   console.log(`  Loan disbursed — ${sig}`);
 
-  await waitForEvent(program, "LoanDisbursedEvent", d => true);
+  // no MXE computation here — accept_terms is immediate
 
   // ─── 8. repay ─────────────────────────────────────────────────────────────
   console.log("\n[5] Repaying full loan…");
   const repayAmount    = BigInt(borrowAmount);
-  const repayAmountCt  = encryptU64(repayAmount,  sharedSecret, nonce + 2n);
-  const oracleRepCt    = encryptU64(solPriceUsd,  sharedSecret, nonce + 2n);
-  const repayNonce     = new anchor.BN((nonce + 2n).toString());
+  const nonceBytes3    = randomBytes(16);
+  const repayAmountCt  = encryptU64(repayAmount,  sharedSecret, nonceBytes3);
+  const oracleRepCt    = encryptU64(solPriceUsd,  sharedSecret, nonceBytes3);
+  const repayNonce     = new anchor.BN(Buffer.from(nonceBytes3).toString("hex"), 16, "le");
   const repayOffset    = freshOffset();
 
   sig = await program.methods
@@ -295,7 +323,7 @@ async function main() {
       borrowerAccount: borrowerAccPda,
       signPdaAccount:  signPda,
       compDefAccount:  compDefAddr("compute_repayment"),
-      computationAccount: anchor.web3.SystemProgram.programId,
+      computationAccount: getComputationAccAddress(clusterOffset, repayOffset),
       tokenProgram:    TOKEN_PROGRAM_ID,
       ...mxePoolAccounts(),
     })
@@ -303,7 +331,7 @@ async function main() {
   console.log(`  Queued — ${sig}`);
 
   console.log("  Waiting for compute_repayment_callback…");
-  await waitForEvent(program, "RepaymentComputedEvent", d => true);
+  await awaitComputationFinalization(provider, repayOffset, PROGRAM_ID, "confirmed");
 
   // ─── 9. settle_repayment ──────────────────────────────────────────────────
   console.log("\n[6] Settling repayment…");
@@ -323,7 +351,6 @@ async function main() {
     .rpc();
   console.log(`  Settled — ${sig}`);
 
-  await waitForEvent(program, "LoanRepaidEvent", d => true);
   console.log("  Collateral returned. Loan cycle complete.");
 
   // ─── 10. check_liquidation (on a separate test borrower or same) ──────────
@@ -331,10 +358,11 @@ async function main() {
   // Create a second ephemeral borrower to test the liquidation path.
   // (For brevity, we check the same account — it will be healthy since it was just repaid.)
   const liqOffset      = freshOffset();
-  const oracleLiqCt    = encryptU64(solPriceUsd,      sharedSecret, nonce + 3n);
-  const currentDebtCt  = encryptU64(BigInt(borrowAmount), sharedSecret, nonce + 3n);
-  const accruedIntCt   = encryptU64(0n,                sharedSecret, nonce + 3n);
-  const liqNonce       = new anchor.BN((nonce + 3n).toString());
+  const nonceBytes4    = randomBytes(16);
+  const oracleLiqCt    = encryptU64(solPriceUsd,         sharedSecret, nonceBytes4);
+  const currentDebtCt  = encryptU64(BigInt(borrowAmount), sharedSecret, nonceBytes4);
+  const accruedIntCt   = encryptU64(0n,                   sharedSecret, nonceBytes4);
+  const liqNonce       = new anchor.BN(Buffer.from(nonceBytes4).toString("hex"), 16, "le");
 
   // Note: check_liquidation requires an active loan. Since we just repaid, this
   // will fail with NoActiveLoan — which is the correct behavior.
@@ -354,7 +382,7 @@ async function main() {
         borrowerAccount: borrowerAccPda,
         signPdaAccount:  signPda,
         compDefAccount:  compDefAddr("check_health"),
-        computationAccount: anchor.web3.SystemProgram.programId,
+        computationAccount: getComputationAccAddress(clusterOffset, liqOffset),
         ...mxePoolAccounts(),
       })
       .rpc();

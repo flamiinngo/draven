@@ -5,6 +5,7 @@ resolver = "2"
 [profile.release]
 overflow-checks = true
 lto = "thin"
+opt-level = "z"
 
 [profile.release.build-override]
 opt-level = 3
