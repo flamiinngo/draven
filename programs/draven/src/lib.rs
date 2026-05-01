@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use arcium_anchor::prelude::*;
 use arcium_client::idl::arcium::types::CallbackAccount;
 
-declare_id!("DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ");
+declare_id!("5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv");
 
 // Computation definition offsets — deterministic from circuit names.
 const COMP_DEF_OFFSET_STORE_BORROWER_PROFILE:  u32 = comp_def_offset("store_borrower_profile");
@@ -42,7 +42,7 @@ pub mod draven {
     /// Lender deposits USDC into the pool vault and records their proportional share.
     /// Reveals: deposited amount. Does not involve any borrower data.
     pub fn deposit_liquidity(ctx: Context<DepositLiquidity>, amount: u64) -> Result<()> {
-        require!(amount > 0, DravenError::ZeroAmount);
+        require!(amount > 0, ErrorCode::ZeroAmount);
 
         token::transfer(
             CpiContext::new(
@@ -63,11 +63,11 @@ pub mod draven {
         lender.bump = ctx.bumps.lender_account;
         lender.deposited_lamports = lender.deposited_lamports
             .checked_add(amount)
-            .ok_or(DravenError::Overflow)?;
+            .ok_or(ErrorCode::Overflow)?;
 
         pool.total_deposits = pool.total_deposits
             .checked_add(amount)
-            .ok_or(DravenError::Overflow)?;
+            .ok_or(ErrorCode::Overflow)?;
 
         emit!(LiquidityDepositedEvent {
             amount,
@@ -80,16 +80,16 @@ pub mod draven {
     /// Lender withdraws their USDC share. Prevents withdrawal if it would leave
     /// the pool underfunded relative to outstanding borrows.
     pub fn withdraw_liquidity(ctx: Context<WithdrawLiquidity>, amount: u64) -> Result<()> {
-        require!(amount > 0, DravenError::ZeroAmount);
+        require!(amount > 0, ErrorCode::ZeroAmount);
 
         let lender = &ctx.accounts.lender_account;
-        require!(amount <= lender.deposited_lamports, DravenError::InsufficientBalance);
+        require!(amount <= lender.deposited_lamports, ErrorCode::InsufficientBalance);
 
         let pool = &ctx.accounts.pool_state;
         let available = pool.total_deposits
             .checked_sub(pool.total_borrowed)
-            .ok_or(DravenError::Overflow)?;
-        require!(amount <= available, DravenError::InsufficientLiquidity);
+            .ok_or(ErrorCode::Overflow)?;
+        require!(amount <= available, ErrorCode::InsufficientLiquidity);
 
         let pool_bump    = pool.bump;
         let signer_seeds: &[&[&[u8]]] = &[&[b"pool", &[pool_bump]]];
@@ -113,7 +113,7 @@ pub mod draven {
         lender.deposited_lamports -= amount;
         pool.total_deposits = pool.total_deposits
             .checked_sub(amount)
-            .ok_or(DravenError::Overflow)?;
+            .ok_or(ErrorCode::Overflow)?;
 
         Ok(())
     }
@@ -142,8 +142,8 @@ pub mod draven {
         nonce:                u128,
         collateral_lamports:  u64,
     ) -> Result<()> {
-        require!(collateral_lamports > 0, DravenError::ZeroAmount);
-        require!(!ctx.accounts.borrower_account.is_active, DravenError::LoanAlreadyActive);
+        require!(collateral_lamports > 0, ErrorCode::ZeroAmount);
+        require!(!ctx.accounts.borrower_account.is_active, ErrorCode::LoanAlreadyActive);
 
         // Deposit collateral into the vault.
         token::transfer(
@@ -246,11 +246,11 @@ pub mod draven {
         params_nonce:      u128,
     ) -> Result<()> {
         let acct = &ctx.accounts.borrower_account;
-        require!(acct.profile_nonce != 0,  DravenError::ProfileNotStored);
-        require!(!acct.is_active,          DravenError::LoanAlreadyActive);
+        require!(acct.profile_nonce != 0,  ErrorCode::ProfileNotStored);
+        require!(!acct.is_active,          ErrorCode::LoanAlreadyActive);
         require!(
             ctx.accounts.borrower.key() == acct.borrower,
-            DravenError::WrongBorrower,
+            ErrorCode::WrongBorrower,
         );
 
         let args = ArgBuilder::new()
@@ -339,12 +339,12 @@ pub mod draven {
         borrow_amount:     u64,
     ) -> Result<()> {
         let acct = &ctx.accounts.borrower_account;
-        require!(acct.terms_nonce != 0,             DravenError::TermsNotComputed);
-        require!(!acct.is_active,                   DravenError::LoanAlreadyActive);
-        require!(rate_tier <= 3,                    DravenError::InvalidTier);
+        require!(acct.terms_nonce != 0,             ErrorCode::TermsNotComputed);
+        require!(!acct.is_active,                   ErrorCode::LoanAlreadyActive);
+        require!(rate_tier <= 3,                    ErrorCode::InvalidTier);
         require!(
             ctx.accounts.borrower.key() == acct.borrower,
-            DravenError::WrongBorrower,
+            ErrorCode::WrongBorrower,
         );
 
         if !approved || rate_tier == 0 {
@@ -376,9 +376,9 @@ pub mod draven {
         let pool = &ctx.accounts.pool_state;
         let available = pool.total_deposits
             .checked_sub(pool.total_borrowed)
-            .ok_or(DravenError::Overflow)?;
-        require!(borrow_amount > 0,              DravenError::ZeroAmount);
-        require!(borrow_amount <= available,     DravenError::InsufficientLiquidity);
+            .ok_or(ErrorCode::Overflow)?;
+        require!(borrow_amount > 0,              ErrorCode::ZeroAmount);
+        require!(borrow_amount <= available,     ErrorCode::InsufficientLiquidity);
 
         // Disburse USDC from vault to borrower.
         let pool_bump = pool.bump;
@@ -400,7 +400,7 @@ pub mod draven {
         let pool = &mut ctx.accounts.pool_state;
         pool.total_borrowed = pool.total_borrowed
             .checked_add(borrow_amount)
-            .ok_or(DravenError::Overflow)?;
+            .ok_or(ErrorCode::Overflow)?;
 
         let clock = Clock::get()?;
         let acct  = &mut ctx.accounts.borrower_account;
@@ -433,11 +433,11 @@ pub mod draven {
         repay_amount:      u64,
     ) -> Result<()> {
         let acct = &ctx.accounts.borrower_account;
-        require!(acct.is_active,                   DravenError::NoActiveLoan);
-        require!(repay_amount > 0,                 DravenError::ZeroAmount);
+        require!(acct.is_active,                   ErrorCode::NoActiveLoan);
+        require!(repay_amount > 0,                 ErrorCode::ZeroAmount);
         require!(
             ctx.accounts.borrower.key() == acct.borrower,
-            DravenError::WrongBorrower,
+            ErrorCode::WrongBorrower,
         );
 
         // Transfer repayment USDC into vault before computing new balance.
@@ -531,11 +531,11 @@ pub mod draven {
         fully_repaid:    bool,
     ) -> Result<()> {
         let acct = &ctx.accounts.borrower_account;
-        require!(acct.is_active,                   DravenError::NoActiveLoan);
-        require!(acct.terms_nonce != 0,            DravenError::RepaymentNotComputed);
+        require!(acct.is_active,                   ErrorCode::NoActiveLoan);
+        require!(acct.terms_nonce != 0,            ErrorCode::RepaymentNotComputed);
         require!(
             ctx.accounts.borrower.key() == acct.borrower,
-            DravenError::WrongBorrower,
+            ErrorCode::WrongBorrower,
         );
 
         let acct = &mut ctx.accounts.borrower_account;
@@ -589,7 +589,7 @@ pub mod draven {
         params_nonce:      u128,
     ) -> Result<()> {
         let acct = &ctx.accounts.borrower_account;
-        require!(acct.is_active, DravenError::NoActiveLoan);
+        require!(acct.is_active, ErrorCode::NoActiveLoan);
 
         let args = ArgBuilder::new()
             .x25519_pubkey(pub_key)
@@ -883,19 +883,19 @@ pub struct RequestLoan<'info> {
     pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(
         mut,
-        address = derive_mempool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub mempool_account: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_execpool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub executing_pool: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_comp_pda!(computation_offset, mxe_account, DravenError::ClusterNotSet)
+        address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
@@ -903,7 +903,7 @@ pub struct RequestLoan<'info> {
     pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(
         mut,
-        address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
@@ -925,7 +925,7 @@ pub struct StoreBorrowerProfileCallback<'info> {
     pub mxe_account: Account<'info, MXEAccount>,
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
-    #[account(address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet))]
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
@@ -959,19 +959,19 @@ pub struct ApplyTerms<'info> {
     pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(
         mut,
-        address = derive_mempool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub mempool_account: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_execpool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub executing_pool: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_comp_pda!(computation_offset, mxe_account, DravenError::ClusterNotSet)
+        address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
@@ -979,7 +979,7 @@ pub struct ApplyTerms<'info> {
     pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(
         mut,
-        address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
@@ -1000,7 +1000,7 @@ pub struct ComputeCreditScoreCallback<'info> {
     pub mxe_account: Account<'info, MXEAccount>,
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
-    #[account(address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet))]
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
@@ -1050,9 +1050,9 @@ pub struct Repay<'info> {
     #[account(address = usdc::ID)]
     pub usdc_mint: Account<'info, Mint>,
     #[account(mut, seeds = [b"vault"], bump = pool_state.vault_bump)]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [b"pool"], bump = pool_state.bump)]
-    pub pool_state: Account<'info, PoolState>,
+    pub pool_state: Box<Account<'info, PoolState>>,
     #[account(
         mut,
         seeds = [b"borrower", borrower.key().as_ref()],
@@ -1072,19 +1072,19 @@ pub struct Repay<'info> {
     pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(
         mut,
-        address = derive_mempool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub mempool_account: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_execpool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub executing_pool: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_comp_pda!(computation_offset, mxe_account, DravenError::ClusterNotSet)
+        address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
@@ -1092,7 +1092,7 @@ pub struct Repay<'info> {
     pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(
         mut,
-        address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
@@ -1114,7 +1114,7 @@ pub struct ComputeRepaymentCallback<'info> {
     pub mxe_account: Account<'info, MXEAccount>,
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
-    #[account(address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet))]
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
@@ -1178,19 +1178,19 @@ pub struct CheckLiquidation<'info> {
     pub mxe_account: Box<Account<'info, MXEAccount>>,
     #[account(
         mut,
-        address = derive_mempool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub mempool_account: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_execpool_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub executing_pool: UncheckedAccount<'info>,
     #[account(
         mut,
-        address = derive_comp_pda!(computation_offset, mxe_account, DravenError::ClusterNotSet)
+        address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet)
     )]
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
@@ -1198,7 +1198,7 @@ pub struct CheckLiquidation<'info> {
     pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
     #[account(
         mut,
-        address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet)
+        address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet)
     )]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
@@ -1219,7 +1219,7 @@ pub struct CheckHealthCallback<'info> {
     pub mxe_account: Account<'info, MXEAccount>,
     /// CHECK: validated by arcium program
     pub computation_account: UncheckedAccount<'info>,
-    #[account(address = derive_cluster_pda!(mxe_account, DravenError::ClusterNotSet))]
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
     pub cluster_account: Box<Account<'info, Cluster>>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
     /// CHECK: instructions sysvar
@@ -1315,7 +1315,7 @@ pub struct InitComputeRepaymentCompDef<'info> {
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 #[error_code]
-pub enum DravenError {
+pub enum ErrorCode {
     #[msg("amount must be greater than zero")]
     ZeroAmount,
     #[msg("insufficient USDC balance for this operation")]
