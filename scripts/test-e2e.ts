@@ -11,7 +11,14 @@
 
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+const TOKEN_PROGRAM_ID           = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe8bXJR");
+function getAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  )[0];
+}
 import {
   getMXEAccAddress,
   getCompDefAccAddress,
@@ -25,7 +32,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { homedir } from "os";
 
-const PROGRAM_ID  = new PublicKey("DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ");
+const PROGRAM_ID  = new PublicKey("5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv");
 const USDC_MINT   = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const [VAULT_PDA] = PublicKey.findProgramAddressSync([Buffer.from("vault")], PROGRAM_ID);
 const [POOL_PDA]  = PublicKey.findProgramAddressSync([Buffer.from("pool")],  PROGRAM_ID);
@@ -89,9 +96,9 @@ async function main() {
 
   const arciumProgram = new anchor.Program(ARCIUM_IDL, provider);
   const mxeAddr       = getMXEAccAddress(PROGRAM_ID);
-  const mxeData       = await arciumProgram.account.mxeAccount.fetch(mxeAddr);
+  const mxeData       = await (arciumProgram.account as any).mxeAccount.fetch(mxeAddr);
 
-  const lenderAta   = await getAssociatedTokenAddress(USDC_MINT, kp.publicKey);
+  const lenderAta   = getAssociatedTokenAddress(USDC_MINT, kp.publicKey);
   const borrowerAta = lenderAta; // same wallet acts as both for e2e
 
   const [lenderAccPda]   = PublicKey.findProgramAddressSync(
@@ -103,7 +110,7 @@ async function main() {
 
   // ─── 1. Deposit liquidity ──────────────────────────────────────────────────
   console.log("\n[1] Depositing 1,000 USDC into pool…");
-  const depositAmount = 1_000 * 1_000_000n; // 1,000 USDC in lamports
+  const depositAmount = 1_000n * 1_000_000n; // 1,000 USDC in lamports
   let sig = await program.methods
     .depositLiquidity(new anchor.BN(depositAmount.toString()))
     .accounts({
@@ -134,7 +141,7 @@ async function main() {
   const pastLoansRepaid  = 5n;
   const pastLiquidations = 0n;
   const collateralLamports = 100_000_000_000n; // 100 SOL
-  const requestedAmount    = 10_000 * 1_000_000n; // $10,000 USDC
+  const requestedAmount    = 10_000n * 1_000_000n; // $10,000 USDC
 
   const walletAgeCt    = encryptU64(walletAgeDays,    sharedSecret, nonce);
   const pastLoansCt    = encryptU64(pastLoansRepaid,  sharedSecret, nonce);
@@ -207,7 +214,7 @@ async function main() {
   const paramsNonce   = new anchor.BN((nonce + 1n).toString());
   const termsOffset   = freshOffset();
 
-  const borrowerAccData = await program.account.borrowerAccount.fetch(borrowerAccPda);
+  const borrowerAccData = await (program.account as any).borrowerAccount.fetch(borrowerAccPda);
 
   sig = await program.methods
     .applyTerms(

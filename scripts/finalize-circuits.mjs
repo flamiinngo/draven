@@ -7,7 +7,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 
-const PROGRAM_ID = new PublicKey("DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ");
+const PROGRAM_ID = new PublicKey("5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv");
 
 const kp = Keypair.fromSecretKey(
   Uint8Array.from(JSON.parse(readFileSync(`${homedir()}/.config/solana/id.json`, "utf8")))

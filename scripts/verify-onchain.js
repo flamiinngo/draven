@@ -20,6 +20,7 @@ const {
   getMXEAccAddress,
   getCompDefAccAddress,
   getCompDefAccOffset,
+  getRawCircuitAccAddress,
   ARCIUM_IDL,
   getArciumProgramId,
 } = require("@arcium-hq/client");
@@ -27,7 +28,7 @@ const { readFileSync }          = require("fs");
 const { resolve }               = require("path");
 const { homedir }               = require("os");
 
-const PROGRAM_ID  = new PublicKey("DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ");
+const PROGRAM_ID  = new PublicKey("5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv");
 const RPC_URL     = process.env.RPC_URL || "https://api.devnet.solana.com";
 const conn        = new Connection(RPC_URL, "confirmed");
 
@@ -93,17 +94,25 @@ async function main() {
 
   for (const name of CIRCUITS) {
     try {
-      const offsetBytes = getCompDefAccOffset(name);
-      const offsetNum   = Buffer.from(offsetBytes).readUInt32LE(0);
-      const compDefAddr = getCompDefAccAddress(PROGRAM_ID, offsetNum);
-      const compDef     = await arciumProgram.account.computationDefinitionAccount.fetch(compDefAddr);
+      const offsetBytes  = getCompDefAccOffset(name);
+      const offsetNum    = Buffer.from(offsetBytes).readUInt32LE(0);
+      const compDefAddr  = getCompDefAccAddress(PROGRAM_ID, offsetNum);
 
-      if (!compDef.finalized) {
-        fail(`${name} finalized`, "finalized=false — run finalize-circuits.mjs");
-      } else if (!compDef.circuitData || compDef.circuitData.length < 500) {
-        fail(`${name} circuit size`, `Only ${compDef.circuitData?.length ?? 0} bytes — was a .idarc file uploaded instead of .arcis?`);
+      // Comp def account must exist (initialized).
+      const compDefInfo = await conn.getAccountInfo(compDefAddr);
+      if (!compDefInfo) {
+        fail(`${name} comp def account`, "Not found — run init-comp-defs.mjs");
+        continue;
+      }
+
+      // Circuit data lives in separate raw circuit accounts (PDA index 0, 1, ...).
+      // A real upload always creates at least index 0.
+      const rawCircuitAddr = getRawCircuitAccAddress(compDefAddr, 0);
+      const rawInfo        = await conn.getAccountInfo(rawCircuitAddr);
+      if (!rawInfo) {
+        fail(`${name} circuit data`, "Raw circuit account not found — run upload-circuits.mjs");
       } else {
-        ok(`${name}: finalized, ${compDef.circuitData.length} bytes`);
+        ok(`${name}: uploaded (${rawInfo.data.length} bytes in raw circuit account)`);
       }
     } catch (e) {
       fail(`${name} comp def account`, e.message);

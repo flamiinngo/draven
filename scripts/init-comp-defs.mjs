@@ -17,7 +17,7 @@ import { homedir } from "os";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require   = createRequire(import.meta.url);
 
-const PROGRAM_ID = new PublicKey("DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ");
+const PROGRAM_ID = new PublicKey("5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv");
 
 const kp = Keypair.fromSecretKey(
   Uint8Array.from(JSON.parse(readFileSync(`${homedir()}/.config/solana/id.json`, "utf8")))
@@ -48,17 +48,30 @@ for (const { name, method } of circuits) {
   const offsetNum      = Buffer.from(offsetBytes).readUInt32LE(0);
   const compDefAddress = getCompDefAccAddress(PROGRAM_ID, offsetNum);
 
+  const existing = await conn.getAccountInfo(compDefAddress);
+  if (existing !== null) {
+    console.log(`${name} comp def already initialized — skipping`);
+    continue;
+  }
   process.stdout.write(`Initializing ${name} comp def…  `);
-  const sig = await program.methods[method]()
-    .accounts({
-      payer:              kp.publicKey,
-      mxeAccount:         mxeAccAddress,
-      compDefAccount:     compDefAddress,
-      addressLookupTable: lutAddress,
-      lutProgram:         AddressLookupTableProgram.programId,
-      arciumProgram:      getArciumProgramId(),
-      systemProgram:      anchor.web3.SystemProgram.programId,
-    })
-    .rpc();
-  console.log(`OK  ${sig}`);
+  try {
+    const sig = await program.methods[method]()
+      .accounts({
+        payer:              kp.publicKey,
+        mxeAccount:         mxeAccAddress,
+        compDefAccount:     compDefAddress,
+        addressLookupTable: lutAddress,
+        lutProgram:         AddressLookupTableProgram.programId,
+        arciumProgram:      getArciumProgramId(),
+        systemProgram:      anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+    console.log(`OK  ${sig}`);
+  } catch (e) {
+    if (e.message?.includes("already in use") || e.message?.includes("AlreadyProcessed")) {
+      console.log(`already initialized`);
+    } else {
+      throw e;
+    }
+  }
 }

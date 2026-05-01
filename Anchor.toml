@@ -5,11 +5,9 @@ anchor_version = "0.32.1"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-draven = "DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ"
-
 [programs.devnet]
-draven = "DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ"
+draven = "5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv"
+
 
 [registry]
 url = "https://api.apr.dev"
