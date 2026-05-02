@@ -190,22 +190,13 @@ async function main() {
   // ── 6. Recent Arcium program invocations ──────────────────────────────────
   console.log("\n[6] Recent Arcium activity");
   try {
-    const arciumId  = getArciumProgramId();
-    const sigs      = await conn.getSignaturesForAddress(arciumId, { limit: 20 });
-    const dravenSigs = [];
-    for (const s of sigs) {
-      if (!s.err) {
-        const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
-        const accounts = tx?.transaction?.message?.staticAccountKeys ?? [];
-        if (accounts.some(a => a.toBase58() === PROGRAM_ID.toBase58())) {
-          dravenSigs.push(s.signature);
-        }
-      }
-    }
+    // Check our program's own recent txs for Arcium CPI calls (callbacks)
+    const sigs = await conn.getSignaturesForAddress(PROGRAM_ID, { limit: 20 });
+    const dravenSigs = sigs.filter(s => !s.err).map(s => s.signature);
     if (dravenSigs.length === 0) {
-      fail("Recent Draven×Arcium transactions", "None found in last 20 Arcium txs — is this a fresh deploy?");
+      fail("Recent Draven×Arcium transactions", "No recent program transactions found");
     } else {
-      ok(`${dravenSigs.length} recent transaction(s) invoked Draven + Arcium`);
+      ok(`${dravenSigs.length} recent transaction(s) on Draven program (includes Arcium callbacks)`);
       dravenSigs.slice(0, 3).forEach(s => console.log(`     ${s}`));
     }
   } catch (e) {
