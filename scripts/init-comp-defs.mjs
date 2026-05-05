@@ -39,6 +39,7 @@ const lutAddress    = getLookupTableAddress(PROGRAM_ID, mxeData.lutOffsetSlot);
 const circuits = [
   { name: "store_borrower_profile",  method: "initStoreBorrowerProfileCompDef" },
   { name: "compute_credit_score",    method: "initComputeCreditScoreCompDef" },
+  { name: "compute_credit_score_v2", method: "initComputeCreditScoreCompDef" },
   { name: "check_health",            method: "initCheckHealthCompDef" },
   { name: "compute_repayment",       method: "initComputeRepaymentCompDef" },
 ];

@@ -3,7 +3,7 @@ import * as anchor from "@coral-xyz/anchor";
 import type { AnchorWallet } from "@solana/wallet-adapter-react";
 
 export const PROGRAM_ID = new PublicKey(
-  import.meta.env.VITE_PROGRAM_ID ?? "DrVNbP7amL2XStk6UEPvuPqCwnTxS9BLd6NchWkRpvZ"
+  import.meta.env.VITE_PROGRAM_ID ?? "5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv"
 );
 
 export const USDC_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
@@ -38,7 +38,7 @@ export async function loadProgram(wallet: AnchorWallet): Promise<anchor.Program>
   anchor.setProvider(provider);
   // IDL is imported from the build artifact. In dev, this comes from
   // the local target/idl/draven.json via Vite's resolveJsonModule.
-  const { default: idl } = await import("../../target/idl/draven.json");
+  const { default: idl } = await import("../draven.json");
   return new anchor.Program(idl as anchor.Idl, provider);
 }
 

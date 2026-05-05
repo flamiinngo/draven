@@ -4,28 +4,34 @@ import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 export default defineConfig({
   plugins: [
-    react(),
     nodePolyfills({
-      include: ["buffer", "crypto", "stream", "util", "process"],
+      include: ["buffer", "crypto", "stream", "util", "process", "events", "path"],
       globals: { Buffer: true, global: true, process: true },
+      protocolImports: true,
     }),
+    react(),
   ],
   define: {
     "process.env": {},
   },
-  build: {
-    target: "es2022",
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          solana: ["@solana/web3.js", "@coral-xyz/anchor"],
-          wallet: [
-            "@solana/wallet-adapter-react",
-            "@solana/wallet-adapter-react-ui",
-            "@solana/wallet-adapter-wallets",
-          ],
-        },
+  optimizeDeps: {
+    include: ["@arcium-hq/client", "@coral-xyz/anchor", "@solana/web3.js", "buffer"],
+    esbuildOptions: {
+      inject: ["./src/buffer-polyfill.js"],
+      define: {
+        global: "globalThis",
+        "process.browser": "true",
+        "process.version": '""',
       },
     },
+  },
+  resolve: {
+    alias: {
+      buffer: "buffer/",
+    },
+  },
+  build: {
+    target: "es2022",
+    rollupOptions: {},
   },
 });

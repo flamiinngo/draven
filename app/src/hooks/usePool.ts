@@ -50,7 +50,11 @@ export function utilizationRate(pool: PoolStats): number {
 /** Annualised pool APY estimate based on utilization and blended rate. */
 export function poolApy(pool: PoolStats): number {
   const util = utilizationRate(pool);
-  // Blended rate: assume 60 % Tier A (6%), 30 % Tier B (12%), 10 % Tier C (18%)
-  const blendedBorrowRate = 0.6 * 6 + 0.3 * 12 + 0.1 * 18; // 9 %
-  return (util / 100) * blendedBorrowRate;
+  return (util / 100) * maxPoolApy();
+}
+
+/** Maximum possible APY at 100 % utilization (blended across tiers). */
+export function maxPoolApy(): number {
+  // Blended rate: 60 % Tier A (6 %), 30 % Tier B (12 %), 10 % Tier C (18 %)
+  return 0.6 * 6 + 0.3 * 12 + 0.1 * 18; // 9 %
 }

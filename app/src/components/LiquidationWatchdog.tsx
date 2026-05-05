@@ -7,8 +7,8 @@ import {
   PROGRAM_ID, POOL_PDA, VAULT_PDA, USDC_MINT,
   freshOffset, sendSafe, makeProvider, loadProgram,
 } from "../utils/anchor";
-import { compDefAddress, deriveSharedSecret, encryptU64, freshNonce, mxePoolAccounts } from "../utils/arcium";
-import { getArciumProgramId } from "@arcium-hq/client";
+import { compDefAddress, deriveSharedSecret, encryptU64Batch, freshNonce, mxePoolAccounts } from "../utils/arcium";
+import { getArciumProgramId, getComputationAccAddress } from "@arcium-hq/client";
 
 type WatchdogStatus = "healthy" | "checking" | "liquidated";
 
@@ -60,7 +60,7 @@ export function LiquidationWatchdog() {
 
       const provider    = makeProvider(wallet);
       const { pubKey, sharedSecret } = await deriveSharedSecret(provider);
-      const mxeAccounts = await mxePoolAccounts(provider);
+      const { accounts: mxeAccounts, clusterOffset } = await mxePoolAccounts(provider);
       const nonce       = freshNonce();
 
       for (const { account, publicKey: acctPubkey } of accounts) {
@@ -68,12 +68,13 @@ export function LiquidationWatchdog() {
         // so we use the stored borrower field).
         const borrowerPk = account.borrower as PublicKey;
 
-        const oraclePriceCt = encryptU64(150_000_000n, sharedSecret, nonce);
-        const currentDebtCt = encryptU64(BigInt(account.borrowedLamports.toString()), sharedSecret, nonce);
-        const accruedIntCt  = encryptU64(0n, sharedSecret, nonce);
+        const [oraclePriceCt, currentDebtCt, accruedIntCt] = encryptU64Batch(
+          [150_000_000n, BigInt(account.borrowedLamports.toString()), 0n],
+          sharedSecret, nonce,
+        );
         const paramsNonce   = new anchor.BN(nonce.toString());
         const liqOffset     = freshOffset();
-        const [signPda]     = PublicKey.findProgramAddressSync([Buffer.from(new Uint8Array(32))], PROGRAM_ID);
+        const [signPda]     = PublicKey.findProgramAddressSync([Buffer.from("ArciumSignerAccount")], PROGRAM_ID);
 
         try {
           await sendSafe(() =>
@@ -92,7 +93,7 @@ export function LiquidationWatchdog() {
                 borrowerAccount:   acctPubkey,
                 signPdaAccount:    signPda,
                 compDefAccount:    compDefAddress("check_health"),
-                computationAccount: anchor.web3.SystemProgram.programId,
+                computationAccount: getComputationAccAddress(clusterOffset, liqOffset),
                 arciumProgram:     getArciumProgramId(),
                 systemProgram:     anchor.web3.SystemProgram.programId,
                 ...mxeAccounts,
@@ -138,8 +139,8 @@ export function LiquidationWatchdog() {
 
   return (
     <>
-      {/* Watchdog dot */}
-      <div
+      {/* Watchdog dot — only visible when there are loans to watch */}
+      {(loanCount > 0 || status === "liquidated") && <div
         className="fixed bottom-6 right-6 z-40 cursor-pointer"
         onMouseEnter={() => setExpanded(true)}
         onMouseLeave={() => setExpanded(false)}
@@ -172,7 +173,7 @@ export function LiquidationWatchdog() {
             />
           )}
         </AnimatePresence>
-      </div>
+      </div>}
 
       {/* Toast notifications */}
       <div className="fixed bottom-16 right-6 z-50 space-y-2 pointer-events-none">

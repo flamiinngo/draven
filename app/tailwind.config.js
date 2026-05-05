@@ -26,8 +26,9 @@ export default {
       borderRadius: {
         DEFAULT: "8px",
         sm: "4px",
-        lg: "8px",
-        xl: "8px",
+        lg: "12px",
+        xl: "16px",
+        "2xl": "20px",
       },
       transitionDuration: {
         hover: "150ms",
@@ -38,24 +39,25 @@ export default {
           "0%":   { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
-        "pulse-seq-1": {
-          "0%, 66%, 100%": { opacity: "0.2" },
-          "33%":           { opacity: "1" },
+        "pulse-seq-1": { "0%, 66%, 100%": { opacity: "0.2" }, "33%": { opacity: "1" } },
+        "pulse-seq-2": { "0%, 33%, 100%": { opacity: "0.2" }, "66%": { opacity: "1" } },
+        "pulse-seq-3": { "0%, 33%, 66%":  { opacity: "0.2" }, "100%": { opacity: "1" } },
+        float: {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%":      { transform: "translateY(-8px)" },
         },
-        "pulse-seq-2": {
-          "0%, 33%, 100%": { opacity: "0.2" },
-          "66%":           { opacity: "1" },
-        },
-        "pulse-seq-3": {
-          "0%, 33%, 66%": { opacity: "0.2" },
-          "100%":         { opacity: "1" },
+        "pulse-ring": {
+          "0%":   { transform: "scale(0.9)", opacity: "1" },
+          "100%": { transform: "scale(1.8)", opacity: "0" },
         },
       },
       animation: {
-        shimmer:      "shimmer 2s linear infinite",
-        "pulse-1":    "pulse-seq-1 1.5s ease-in-out infinite",
-        "pulse-2":    "pulse-seq-2 1.5s ease-in-out infinite",
-        "pulse-3":    "pulse-seq-3 1.5s ease-in-out infinite",
+        shimmer:        "shimmer 2s linear infinite",
+        "pulse-1":      "pulse-seq-1 1.5s ease-in-out infinite",
+        "pulse-2":      "pulse-seq-2 1.5s ease-in-out infinite",
+        "pulse-3":      "pulse-seq-3 1.5s ease-in-out infinite",
+        float:          "float 4s ease-in-out infinite",
+        "pulse-ring":   "pulse-ring 1.5s ease-out infinite",
       },
     },
   },

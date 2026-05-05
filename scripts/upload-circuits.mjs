@@ -25,6 +25,7 @@ const DONE_FILE  = resolve(__dirname, "../.upload-progress.json");
 const circuits = [
   "store_borrower_profile",
   "compute_credit_score",
+  "compute_credit_score_v2",
   "check_health",
   "compute_repayment",
 ];
@@ -41,7 +42,8 @@ function isNetworkError(err) {
   const msg = String(err?.message ?? err?.cause ?? err);
   return msg.includes("fetch failed") || msg.includes("ETIMEDOUT") ||
          msg.includes("ECONNRESET") || msg.includes("ENETUNREACH") ||
-         msg.includes("blockhash") || msg.includes("socket hang up");
+         msg.includes("blockhash") || msg.includes("socket hang up") ||
+         msg.includes("429") || msg.includes("Too Many Requests");
 }
 
 async function uploadWithRetry(name, arcis) {

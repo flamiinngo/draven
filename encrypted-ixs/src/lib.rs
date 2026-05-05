@@ -105,16 +105,16 @@ mod circuits {
     ///   liquidation penalty: −30 per past liquidation event (applied after weighting)
     ///   collateral ratio:    35 % weight (0–100 component)
     ///
-    /// Tier thresholds (out of 100):
-    ///   ≥ 75 → Tier A, 6 % APR, 125 % of collateral max borrow
-    ///   ≥ 55 → Tier B, 12 % APR, 100 % of collateral max borrow
-    ///   ≥ 30 → Tier C, 18 % APR, 75 % of collateral max borrow
-    ///   < 30 → Rejected
+    /// Tier thresholds (out of 100) — relaxed for devnet testing:
+    ///   ≥ 40 → Tier A, 6 % APR, 125 % of collateral max borrow
+    ///   ≥ 25 → Tier B, 12 % APR, 100 % of collateral max borrow
+    ///   ≥ 10 → Tier C, 18 % APR, 75 % of collateral max borrow
+    ///   < 10 → Rejected
     #[instruction]
-    pub fn compute_credit_score(
+    pub fn compute_credit_score_v2(
         params:  Enc<Shared, ScoreParams>,
         profile: Enc<Mxe, BorrowerProfile>,
-    ) -> Enc<Shared, LoanTerms> {
+    ) -> u64 {
         let sc = params.to_arcis();
         let p  = profile.to_arcis();
 
@@ -175,14 +175,14 @@ mod circuits {
         };
 
         // ── tier mapping ──────────────────────────────────────────────────────
-        let (approved, rate_tier, max_borrow_lamports) = if final_score >= 75 {
+        let (approved, rate_tier, max_borrow_lamports) = if final_score >= 40 {
             // Tier A: may borrow up to 125 % of collateral USD value
             let max = collateral_usd_lamports * 12_500 / 10_000;
             (1u64, 1u64, max)
-        } else if final_score >= 55 {
+        } else if final_score >= 25 {
             // Tier B: up to 100 %
             (1u64, 2u64, collateral_usd_lamports)
-        } else if final_score >= 30 {
+        } else if final_score >= 10 {
             // Tier C: up to 75 %
             let max = collateral_usd_lamports * 7_500 / 10_000;
             (1u64, 3u64, max)
@@ -190,12 +190,9 @@ mod circuits {
             (0u64, 0u64, 0u64)
         };
 
-        // The score (final_score) is intentionally not included in the output.
-        params.owner.from_arcis(LoanTerms {
-            approved,
-            rate_tier,
-            max_borrow_lamports,
-        })
+        // The score is discarded. Only rate_tier crosses the MXE boundary — as plaintext,
+        // so the on-chain program can enforce it in accept_terms.
+        rate_tier.reveal()
     }
 
     // ─── check_health ─────────────────────────────────────────────────────────

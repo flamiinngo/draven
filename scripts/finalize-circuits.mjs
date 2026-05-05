@@ -20,7 +20,7 @@ anchor.setProvider(provider);
 
 const circuits = [
   "store_borrower_profile",
-  "compute_credit_score",
+  "compute_credit_score_v2",
   "check_health",
   "compute_repayment",
 ];
