@@ -4,6 +4,7 @@ Private undercollateralised lending on Solana. Borrowers pledge USDC, the protoc
 
 Tier A wallets (~6% APR) borrow up to 125% of their collateral. Tier C is fully collateralised. The numbers that decide which tier you land in stay encrypted end-to-end.
 
+- **Live demo:** https://draveen.vercel.app
 - **Program ID:** `5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv` (devnet)
 - **USDC mint:** `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` (Circle devnet USDC)
 - **Stack:** Anchor 0.32 · Arcium 0.9.6 · Solana 1.18 · Vite 5 · React 18
