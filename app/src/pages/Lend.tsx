@@ -268,15 +268,33 @@ export function Lend() {
             </p>
           </div>
 
-          <div className="p-4 rounded-lg" style={{ background: "#0a0a0a", border: "1px solid #141414" }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs" style={{ color: "#52525b" }}>Available to withdraw</span>
-              <span className="text-sm font-mono" style={{ color: "#e4e4e7" }}>
-                {pool ? `$${formatUsdc(pool.totalDeposits - pool.totalBorrowed)}` : "—"}
-              </span>
-            </div>
-            <p className="text-xs" style={{ color: "#2a2a2a" }}>Free liquidity in the pool</p>
-          </div>
+          {(() => {
+            const freeLiquidity = pool ? pool.totalDeposits - pool.totalBorrowed : null;
+            const lenderMax = lenderDeposit !== null && freeLiquidity !== null
+              ? (lenderDeposit < freeLiquidity ? lenderDeposit : freeLiquidity)
+              : null;
+            return (
+              <div className="p-4 rounded-lg space-y-2" style={{ background: "#0a0a0a", border: "1px solid #141414" }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: "#52525b" }}>Available to withdraw</span>
+                  <span className="text-sm font-mono font-semibold" style={{ color: "#a5b4fc" }}>
+                    {lenderMax !== null ? `$${formatUsdc(lenderMax)}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: "#3f3f46" }}>Free liquidity in pool</span>
+                  <span className="text-xs font-mono" style={{ color: "#52525b" }}>
+                    {freeLiquidity !== null ? `$${formatUsdc(freeLiquidity)}` : "—"}
+                  </span>
+                </div>
+                {lenderDeposit !== null && freeLiquidity !== null && lenderDeposit > freeLiquidity && (
+                  <p className="text-xs" style={{ color: "#fbbf24" }}>
+                    Capped by pool liquidity — wait for borrowers to repay to withdraw the rest.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           <form onSubmit={handleWithdraw} className="space-y-3">
             <div className="space-y-1.5">

@@ -1,125 +1,88 @@
-# Draven — Private Undercollateralised Lending Protocol
+# Draven
 
-Draven is the first lending protocol on Solana where creditworthiness is computed **inside an Arcium MXE**. Borrowers can access undercollateralised loans — down to 75% collateral ratio for Tier A wallets — without ever revealing their credit score, collateral amount, or health factor to any external party.
+Private undercollateralised lending on Solana. Borrowers pledge USDC, the protocol scores their credit history *inside an Arcium MPC cluster*, and only the resulting rate tier ever touches the chain — never the score, the inputs, or the health factor.
 
----
+Tier A wallets (~6% APR) borrow up to 125% of their collateral. Tier C is fully collateralised. The numbers that decide which tier you land in stay encrypted end-to-end.
 
-## Privacy model
+- **Program ID:** `5ZSXksL5NUbqKeHyCVuaxm7Ze31iVYWR6jGE7BpzWSVv` (devnet)
+- **USDC mint:** `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` (Circle devnet USDC)
+- **Stack:** Anchor 0.32 · Arcium 0.9.6 · Solana 1.18 · Vite 5 · React 18
 
-| What stays hidden inside the MXE | What is published on-chain |
-|---|---|
-| Borrower's raw collateral amount | Loan approval: yes / no |
-| Credit score and all scoring inputs | Assigned rate tier (A / B / C byte) |
-| Health factor / LTV ratio | Repayment result ciphertexts (no plaintext) |
-| Liquidation threshold per borrower | Liquidation result: boolean |
-| Interest accrual per borrower | Borrowed lamports (debt magnitude) |
+## How it actually works
 
-The credit score is computed and discarded inside the MXE — it is not in any output ciphertext, event, or account.
+There are four MPC circuits running inside the Arcium MXE. Each one consumes encrypted inputs from the client (X25519 ECDH + Rescue cipher in CTR mode), runs computation on shared field elements across the cluster, and either returns a public result or hands ciphertext back encrypted to the borrower's ephemeral key.
 
----
-
-## Architecture
-
-```
-encrypted-ixs/          Arcis circuits (Rust, compiled to .arcis)
-programs/draven/        Anchor program (Rust)
-app/                    React 18 + Vite 5 frontend
-scripts/                Deploy and verification scripts
-patches/                patch-package diffs for @arcium-hq/client
-```
-
-### Four circuits
-
-| Circuit | Type | Input | Output |
+| Circuit | Inputs | Output | Used by |
 |---|---|---|---|
-| `store_borrower_profile` | store_X | `Enc<Shared, BorrowerProfile>` | `Enc<Mxe, BorrowerProfile>` |
-| `compute_credit_score` | compute_X | `Enc<Shared, ScoreParams>` + `Enc<Mxe, BorrowerProfile>` | `Enc<Shared, LoanTerms>` |
-| `check_health` | check_X | `Enc<Shared, HealthParams>` + `Enc<Mxe, BorrowerProfile>` | `bool` |
-| `compute_repayment` | compute_X | `Enc<Shared, RepayParams>` + `Enc<Mxe, BorrowerProfile>` | `Enc<Shared, RepayResult>` |
+| `store_borrower_profile` | `Enc<Shared, BorrowerProfile>` | `Enc<Mxe, BorrowerProfile>` | `request_loan` — re-keys the profile under an MXE-only key so subsequent circuits can re-read it from the borrower account without the client ever sending it again |
+| `compute_credit_score_v2` | `Enc<Shared, ScoreParams>` + `Enc<Mxe, BorrowerProfile>` | `u64` (rate tier) | `apply_terms` — runs the scoring formula, reveals only the tier (1/2/3) or 0 for rejection |
+| `check_health` | `Enc<Shared, HealthParams>` + `Enc<Mxe, BorrowerProfile>` | `bool` | `check_liquidation` — anyone can call it on any active loan; only the boolean leaves the cluster |
+| `compute_repayment` | `Enc<Shared, RepayParams>` + `Enc<Mxe, BorrowerProfile>` | `Enc<Shared, RepayResult>` | `repay` — returns remaining debt + a fully-repaid flag, encrypted to the borrower |
 
-### Why two instructions per compute circuit?
+Two compute circuits return ciphertext, not plaintext. That's because the borrower's repayment balance and the exact loan terms shouldn't be readable on-chain. The flow there is two-step: an Arcium callback writes the ciphertexts, the borrower decrypts off-chain, then calls a settlement instruction with the plaintext values. The on-chain program never sees the score or the remaining debt magnitude until the borrower volunteers it.
 
-`compute_credit_score` and `compute_repayment` return `Enc<Shared, T>` — ciphertexts encrypted to the borrower's ephemeral X25519 key. The on-chain program cannot decrypt these. This is the correct Arcium architecture:
+## The privacy table
 
-1. **Callback** (Arcium-triggered): stores ciphertexts + nonce, emits event
-2. **Settlement** (client-triggered after off-chain decryption): provides plaintext values, program acts
+| Hidden inside the MXE | Public on-chain |
+|---|---|
+| Wallet age, repayment history, liquidation count | Pool deposit / borrow totals |
+| Collateral USD value at oracle price | Collateral lamport count (locked amount) |
+| Credit score (computed and discarded inside the cluster) | Rate tier byte (1/2/3) |
+| Loan-to-value ratio, health factor | Liquidation event (bool) |
+| Per-borrower interest accrual | Aggregate interest paid to pool |
+| Remaining debt after repayment | `is_active` flag |
 
-This proves the credit score never touches the on-chain program. A protocol that claimed to disburse a loan directly from a `compute_X` callback would be lying — the callback can't read the encrypted terms.
+The score is never written to any account, event, or output ciphertext. It is constructed inside the cluster, used to pick the tier, then dropped.
 
----
+## Repository layout
 
-## Circuit sizes after build
+```
+encrypted-ixs/        Arcis circuits (Rust → .arcis bytecode)
+programs/draven/      Anchor program — request/apply/accept/repay/check_liquidation
+app/                  Vite + React frontend (deployed standalone on Vercel)
+scripts/              Devnet helpers — deploy, init comp defs, upload, finalise, e2e test
+patches/              patch-package diffs for @arcium-hq/client@0.9.6
+```
 
-Run `cargo arcis build` in `encrypted-ixs/` to get the `.arcis` binaries in `build/`. Expected sizes are in the range of 50–200 kB per circuit. If any circuit is smaller than 500 bytes, the wrong file type was built.
-
----
-
-## Deploy
+## Run locally
 
 ```bash
-# 1. Install dependencies
+# circuits + program
 npm install
-
-# 2. Build circuits
 npm run build:circuits
-
-# 3. Build Anchor program
 npm run build:program
 
-# 4. Deploy (updates declare_id! — re-run build after deploy)
+# devnet bootstrap (one-time)
 anchor deploy --provider.cluster devnet
-
-# 5. Initialize computation definitions
 npm run init-comp-defs
-
-# 6. Upload circuit binaries
-RPC_URL=<your-helius-url> npm run upload-circuits
-
-# 7. Finalize circuits
+RPC_URL=<helius-or-equivalent> npm run upload-circuits
 npm run finalize-circuits
+
+# end-to-end smoke test (deposit → borrow → repay → liquidation check)
+npx ts-node scripts/test-e2e.ts
+
+# frontend
+cd app && npm install && npm run dev
 ```
 
----
-
-## Verify on-chain (judge command)
-
-```bash
-node scripts/verify-onchain.js
-```
-
-With a specific borrower account:
+## Verifying the privacy claim
 
 ```bash
 node scripts/verify-onchain.js --borrower <wallet-pubkey>
 ```
 
-Output will confirm:
-- Program is deployed and executable
-- All 4 circuits are finalized with correct byte sizes
-- BorrowerAccount stores ciphertext, not plaintext scores
-- Pool vault holds real USDC
-- Recent transactions invoked Arcium program
+Reads the borrower account, asserts that `encrypted_profile` is non-zero ciphertext, that `rate_tier` is in `{0,1,2,3}` (no leaked score), and that the four comp-def accounts exist and are finalised on devnet. The script also lists recent program signatures so you can scan them for Arcium callback CPIs.
 
----
+## Devnotes
 
-## Frontend
+A few things that are easy to get wrong with `@arcium-hq/client@0.9.6`:
 
-```bash
-cd app
-npm install
-npm run dev    # development
-npm run build  # production (must pass with zero warnings)
-```
+- Use `RescueCipher` for `Enc<Shared, T>`, not `CSplRescueCipher`. The MXE derives its keystream over Curve25519's *base* field; `CSplRescueCipher` derives over the *scalar* field, which produces a different RescuePrimeHash digest and therefore a different keystream — encrypt/decrypt will round-trip locally but the cluster will read garbage and every loan rejects.
+- Encrypt all fields of an `Enc<Shared, T>` struct in a single `cipher.encrypt([v0..vN], nonce)` call. The CTR counter advances by position within the call, so encrypting fields one at a time puts every ciphertext at counter position 0 and the cluster's batch decrypt mismatches positions 1..N.
+- `chunkSize=15` for `uploadCircuit`. Larger chunks hit the devnet RPC limits and the SDK doesn't surface the failure cleanly.
+- All Arcium-side accounts in callback contexts must be `Box<>`'d. Otherwise the BPF stack overflows during deserialisation.
+- Treat `AlreadyProcessed` as success in any retry wrapper — devnet sometimes confirms the same signature twice.
 
----
+## License
 
-## Known Arcium gotchas applied
-
-1. `@arcium-hq/client@0.9.6` pinned exactly — patch-package diffs in `patches/`
-2. `.arcis` binaries uploaded (not `.idarc`) — size guard in upload script
-3. All Arcium accounts `Box<>`'d in callback structs (stack budget)
-4. Event field names read as `snake_case` (`result_nonce` not `resultNonce`)
-5. `freshOffset()` uses `crypto.getRandomValues` not `Date.now()`
-6. `AlreadyProcessed` treated as success in all `sendSafe` calls
-7. `chunkSize=15` for all RPC upload calls
-8. State machine clears all stale state on `request_loan` re-entry
+MIT
